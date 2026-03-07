@@ -1,103 +1,60 @@
-import { Server as SockerIOServer } from "socket.io";
+import Pusher from "pusher";
 import Message from "./models/MessagesModel.js";
 import Channel from "./models/ChannelModel.js";
 
-const setupSocket = (server) => {
-  const io = new SockerIOServer(server, {
-    cors: {
-      origin: process.env.ORIGIN,
-      methods: ["GET", "POST"],
-      credentials: true,
-    },
+const pusher = new Pusher({
+  appId: process.env.PUSHER_APP_ID,
+  key: process.env.PUSHER_KEY,
+  secret: process.env.PUSHER_SECRET,
+  cluster: process.env.PUSHER_CLUSTER,
+  useTLS: true,
+});
+
+const setupSocket = (app) => {
+  // Direct API route for sending messages via Pusher
+  app.post("/api/messages/send-message", async (req, res) => {
+    try {
+      const { message } = req.body;
+      const createdMessage = await Message.create(message);
+      
+      const messageData = await Message.findById(createdMessage._id)
+        .populate("sender", "id email firstName lastName image color")
+        .populate("recipient", "id email firstName lastName image color");
+
+      // Triggering Pusher event to both sender and recipient
+      await pusher.trigger(`user-${message.recipient}`, "recieveMessage", messageData);
+      await pusher.trigger(`user-${message.sender}`, "recieveMessage", messageData);
+      
+      return res.status(200).json(messageData);
+    } catch (error) {
+      return res.status(500).json({ message: "Internal Server Error" });
+    }
   });
 
-  const userSocketMap = new Map();
+  app.post("/api/messages/send-channel-message", async (req, res) => {
+    try {
+      const { message } = req.body;
+      const { sender, content, messagesTypes, fileUrl, channelId } = message;
 
-  const disconnect = (socket) => {
-    console.log(`Client Disconnected: ${socket.id}`);
-    for (const [userId, socketId] of userSocketMap.entries()) {
-      if (socketId === socket.id) {
-        userSocketMap.delete(userId);
-        break;
-      }
-    }
-  };
-
-  const sendMessage = async (message) => {
-    console.log("message", message);
-
-    const senderSocketId = userSocketMap.get(message.sender);
-    const recipientSocketId = userSocketMap.get(message.recipient);
-
-    const createdMessage = await Message.create(message);
-
-    const messageData = await Message.findById(createdMessage._id)
-      .populate("sender", "id email firstName lastName image color")
-      .populate("recipient", "id email firstName lastName image color");
-
-    if (recipientSocketId) {
-      io.to(recipientSocketId).emit("recieveMessage", messageData);
-    }
-    if (senderSocketId) {
-      io.to(senderSocketId).emit("recieveMessage", messageData);
-    }
-  };
-
-  const sendChannelMessage = async (message) => {
-    const { sender, content, messagesTypes, fileUrl, channelId } = message;
-
-    const createMessage = await Message.create({
-      sender,
-      recipient: null,
-      content,
-      messagesTypes,
-      timeStamp: new Date(),
-      fileUrl,
-    });
-    console.log("createMessage", createMessage);
-    
-
-    const messageData = await Message.findById(createMessage._id)
-      .populate("sender", "id email firstName lastName image color")
-      .exec();
-
-    await Channel.findByIdAndUpdate(channelId, {
-      $push: { messages: createMessage._id },
-    });
-
-    const channel = await Channel.findById(channelId).populate("members");
-
-    const finalData = { ...messageData._doc, channelId: channel._id };
-
-    console.log("finalData ", finalData);
-    
-    if (channel && channel.members) {
-      channel.members.forEach((member) => {
-        const memberSocketId = userSocketMap.get(member._id.toString());
-        if (memberSocketId) {
-          io.to(memberSocketId).emit("recieve-channel-message", finalData);
-        }
+      const createMessage = await Message.create({
+        sender, recipient: null, content, messagesTypes,
+        timeStamp: new Date(), fileUrl,
       });
-      const adminSocketId = userSocketMap.get(channel.admin._id.toString());
-      if (adminSocketId) {
-        io.to(adminSocketId).emit("recieve-channel-message", finalData);
-      }
+
+      const messageData = await Message.findById(createMessage._id)
+        .populate("sender", "id email firstName lastName image color").exec();
+
+      await Channel.findByIdAndUpdate(channelId, { $push: { messages: createMessage._id } });
+
+      const finalData = { ...messageData._doc, channelId };
+
+      // Triggering to all channel members
+      await pusher.trigger(`channel-${channelId}`, "recieve-channel-message", finalData);
+      
+      return res.status(200).json(finalData);
+    } catch (error) {
+      return res.status(500).json({ message: "Internal Server Error" });
     }
-  };
-
-  io.on("connection", (socket) => {
-    const userId = socket.handshake.query.userId;
-
-    if (userId) {
-      userSocketMap.set(userId, socket.id);
-      console.log(`User connected: ${userId} with Socket ID: ${socket.id}`);
-    } else {
-      console.log("User ID not provided during connection");
-    }
-
-    socket.on("sendMessage", sendMessage);
-    socket.on("send-channel-message", sendChannelMessage);
-    socket.on("disconnect", () => disconnect(socket));
   });
 };
 

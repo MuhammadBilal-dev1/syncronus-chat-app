@@ -1,6 +1,5 @@
 import { createContext, useContext, useEffect, useRef } from "react";
-import { HOST } from "../utils/constant";
-import { io } from "socket.io-client";
+import Pusher from "pusher-js";
 import { useAppStore } from "../store";
 
 const SocketContext = createContext(null);
@@ -10,70 +9,67 @@ export const useSocket = () => {
 };
 
 export const SocketProvider = ({ children }) => {
-  const socket = useRef();
-  const { userInfo } = useAppStore();
+  const pusherRef = useRef();
+  const { userInfo, selectedChatData, selectedChatType } = useAppStore();
 
+  // 1. Initial Connection & Private DM Channel
   useEffect(() => {
     if (userInfo) {
-      socket.current = io(HOST, {
-        withCredentials: true,
-        query: { userId: userInfo.id },
+      pusherRef.current = new Pusher(import.meta.env.VITE_PUSHER_KEY, {
+        cluster: import.meta.env.VITE_PUSHER_CLUSTER,
       });
 
-      socket.current.on("connect", () => {
-        console.log("Connected to socket server");
-      });
+      const userChannel = pusherRef.current.subscribe(`user-${userInfo.id}`);
 
-      const handleReceiveMessage = (message) => {
-        const {
-          selectedChatData,
-          selectedChatType,
-          addMessage,
-          addContactsInDMCOntacts,
-        } = useAppStore.getState();
+      userChannel.bind("recieveMessage", (message) => {
+        const { selectedChatData, selectedChatType, addMessage, addContactsInDMCOntacts } = useAppStore.getState();
         
         if (
-          selectedChatType !== undefined &&
+          selectedChatType === "contact" &&
           (selectedChatData?._id === message.sender._id ||
             selectedChatData?._id === message.recipient._id)
         ) {
-
           addMessage(message);
         }
         addContactsInDMCOntacts(message);
-      };
-
-      const handleReceiveChannelMessages = (message) => {
-        const {
-          selectedChatData,
-          selectedChatType,
-          addMessage,
-          addChannelInChannelList,
-        } = useAppStore.getState();
-
-        if (
-          selectedChatType !== undefined &&
-          selectedChatData._id === message.channelId
-        ) {
-          addMessage(message);
-        }
-        addChannelInChannelList(message);
-      };
-
-      socket.current.on("recieveMessage", handleReceiveMessage);
-      socket.current.on(
-        "recieve-channel-message",
-        handleReceiveChannelMessages
-      );
+      });
 
       return () => {
-        socket.current.disconnect();
+        pusherRef.current.unsubscribe(`user-${userInfo.id}`);
+        pusherRef.current.disconnect();
       };
     }
   }, [userInfo]);
 
+  // 2. Dynamic Channel Subscription (For Group Chats)
+  useEffect(() => {
+    if (pusherRef.current && selectedChatType === "channel" && selectedChatData?._id) {
+      const channelId = selectedChatData._id;
+      const channelName = `channel-${channelId}`;
+      
+      const channel = pusherRef.current.subscribe(channelName);
+
+      channel.bind("recieve-channel-message", (message) => {
+        const { selectedChatData, addMessage, addChannelInChannelList } = useAppStore.getState();
+        
+        // Agar wahi channel khula hai toh message add karo
+        if (selectedChatData?._id === message.channelId) {
+          addMessage(message);
+        }
+        // Sidebar update karne ke liye
+        addChannelInChannelList(message);
+      });
+
+      console.log(`Subscribed to channel: ${channelName}`);
+
+      return () => {
+        pusherRef.current.unsubscribe(channelName);
+      };
+    }
+  }, [selectedChatData, selectedChatType]);
+
   return (
-    <SocketContext.Provider value={socket.current}>
+    <SocketContext.Provider value={pusherRef.current}>
       {children}
     </SocketContext.Provider>
   );

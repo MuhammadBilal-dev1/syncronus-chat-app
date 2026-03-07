@@ -3,7 +3,7 @@ import { GrAttachment } from "react-icons/gr";
 import { RiEmojiStickerLine } from "react-icons/ri";
 import { IoSend } from "react-icons/io5";
 import EmojiPicker from "emoji-picker-react";
-import { useSocket } from "../../../../../../context/SocketContext";
+// import { useSocket } from "../../../../../../context/SocketContext";
 import { useAppStore } from "../../../../../../store";
 import { apiClient } from "../../../../../../lib/api-client";
 import { UPLOAD_FILE_ROUTE } from "../../../../../../utils/constant";
@@ -11,7 +11,7 @@ import { UPLOAD_FILE_ROUTE } from "../../../../../../utils/constant";
 const MessageBar = () => {
   const emojiRef = useRef();
   const fileInputRef = useRef();
-  const socket = useSocket();
+  // const socket = useSocket();
   const {
     selectedChatType,
     selectedChatData,
@@ -38,26 +38,30 @@ const MessageBar = () => {
     setMessage((msg) => msg + emoji.emoji);
   };
 
-  const handleSendMessage = () => {
+  const handleSendMessage = async () => {
+    if (message.length > 0) {
+      const commonData = {
+        sender: userInfo.id,
+        content: message,
+        messagesTypes: "text",
+        fileUrl: undefined,
+      };
 
-    if (selectedChatType === "contact") {
-      socket.emit("sendMessage", {
-        sender: userInfo.id,
-        content: message,
-        recipient: selectedChatData._id,
-        messagesTypes: "text",
-        fileUrl: undefined,
-      });
-    } else if (selectedChatType === "channel") {
-      socket.emit("send-channel-message", {
-        sender: userInfo.id,
-        content: message,
-        messagesTypes: "text",
-        fileUrl: undefined,
-        channelId: selectedChatData._id,
-      });
+      try {
+        if (selectedChatType === "contact") {
+          await apiClient.post("/api/messages/send-message", {
+            message: { ...commonData, recipient: selectedChatData._id },
+          });
+        } else if (selectedChatType === "channel") {
+          await apiClient.post("/api/messages/send-channel-message", {
+            message: { ...commonData, channelId: selectedChatData._id },
+          });
+        }
+        setMessage(""); // Input clear karein
+      } catch (error) {
+        console.error("Message sending failed:", error);
+      }
     }
-    setMessage("");
   };
 
   const handleAttachmentClick = () => {
@@ -82,26 +86,24 @@ const MessageBar = () => {
 
         if (response.status === 200 && response.data) {
           setIsUploading(false);
+          const commonFileData = {
+            sender: userInfo.id,
+            content: undefined,
+            messagesTypes: "file",
+            fileUrl: response.data.filePath,
+          };
+
           if (selectedChatType === "contact") {
-            socket.emit("sendMessage", {
-              sender: userInfo.id,
-              content: undefined,
-              recipient: selectedChatData._id,
-              messagesTypes: "file",
-              fileUrl: response.data.filePath,
+            await apiClient.post("/api/messages/send-message", {
+              message: { ...commonFileData, recipient: selectedChatData._id },
             });
           } else if (selectedChatType === "channel") {
-            socket.emit("send-channel-message", {
-              sender: userInfo.id,
-              content: undefined,
-              messagesTypes: "file",
-              fileUrl: response.data.filePath,
-              channelId: selectedChatData._id,
+            await apiClient.post("/api/messages/send-channel-message", {
+              message: { ...commonFileData, channelId: selectedChatData._id },
             });
           }
         }
       }
-    
     } catch (error) {
       setIsUploading(false);
       console.log({ error });

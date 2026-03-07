@@ -38,9 +38,13 @@ const server = app.listen(port, () => {
   console.log(`server is running http://localhost:${port}`);
 });
 
-setupSocket(server);
+setupSocket(app);
 
 mongoose
   .connect(databaseURL)
   .then(() => console.log(`✅ DB connection Successfull`))
   .catch((error) => console.log(`❌ Connection Failed `, error));
+
+
+  // index.js ke aakhir mein ye add karein
+export default app;
