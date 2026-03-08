@@ -8,12 +8,18 @@ import contactRoutes from "./routes/ContactsRoutes.js";
 import setupSocket from "./socket.js";
 import messageRoutes from "./routes/MessageRoutes.js";
 import channelRoutes from "./routes/ChannelRoutes.js";
-
+// ... baqi imports wahi rahengi
 dotenv.config();
 
 const app = express();
-const port = process.env.PORT || 3001;
+// DATABASE_URL check karein
 const databaseURL = process.env.DATABASE_URL;
+
+// DB Connection ko app.use se pehle le aayein taake request handle hone se pehle connect ho jaye
+mongoose
+  .connect(databaseURL)
+  .then(() => console.log(`✅ DB connection Successfull`))
+  .catch((error) => console.log(`❌ Connection Failed `, error));
 
 app.use(
   cors({
@@ -23,28 +29,23 @@ app.use(
   })
 );
 
-// app.use("/uploads/profiles", express.static("uploads/profiles"));
-app.use("/uploads/files", express.static("uploads/files"));
-
 app.use(cookieParser());
 app.use(express.json());
 
+// Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/contacts", contactRoutes);
 app.use("/api/messages", messageRoutes);
-app.use("/api/channel", channelRoutes)
+app.use("/api/channel", channelRoutes);
 
-const server = app.listen(port, () => {
-  console.log(`server is running http://localhost:${port}`);
-});
-
+// Socket setup (Is mein humne Pusher integrate kiya hua hai local test ke baad)
 setupSocket(app);
 
-mongoose
-  .connect(databaseURL)
-  .then(() => console.log(`✅ DB connection Successfull`))
-  .catch((error) => console.log(`❌ Connection Failed `, error));
+// IMPORTANT: Vercel par iski zaroorat nahi hoti, niche wala condition add karein
+if (process.env.NODE_ENV !== "production") {
+  app.listen(process.env.PORT || 3001, () => {
+    console.log(`Server running on port ${process.env.PORT || 3001}`);
+  });
+}
 
-
-  // index.js ke aakhir mein ye add karein
 export default app;
