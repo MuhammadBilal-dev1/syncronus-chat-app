@@ -22,7 +22,7 @@ export const signUp = async (req, res, next) => {
 
     const user = await User.create({ email, password });
     res.cookie("jwt", createToken(email, user.id), {
-      maxAge,
+      httpOnly: true,
       secure: true,
       sameSite: "None",
     });
@@ -73,7 +73,7 @@ export const login = async (req, res, next) => {
         id: user.id,
         email: user.email,
         profileSetup: user.profileSetup,
-        firstName: user.firstname,
+        firstName: user.firstName,
         lastName: user.lastName,
         image: user.image,
         color: user.color,
